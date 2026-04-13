@@ -1,0 +1,261 @@
+# .github/workflows/ci.yml
+name: CyberPrime CI
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-windows:
+    name: Build on Windows
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    
+    - name: Restore dependencies
+      run: dotnet restore Chatbot/Chatbot.csproj /p:RuntimeIdentifier=win-x64
+      working-directory: .
+    
+    - name: Build project
+      run: dotnet build Chatbot/Chatbot.csproj --configuration Release --no-restore
+      working-directory: .
+    
+    - name: Publish Windows executable
+      run: |
+        dotnet publish Chatbot/Chatbot.csproj `
+          --configuration Release `
+          --output ./publish/windows `
+          --runtime win-x64 `
+          --self-contained false `
+          --no-restore
+      working-directory: .
+    
+    - name: Upload Windows build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: CyberPrime-Windows
+        path: ./publish/windows
+        retention-days: 30
+
+  build-linux:
+    name: Build on Linux (Compatibility)
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    
+    - name: Restore dependencies for Linux
+      run: dotnet restore Chatbot/Chatbot.csproj /p:RuntimeIdentifier=linux-x64
+      working-directory: .
+    
+    - name: Build project
+      run: dotnet build Chatbot/Chatbot.csproj --configuration Release --no-restore
+      working-directory: .
+    
+    - name: Publish Linux executable
+      run: |
+        dotnet publish Chatbot/Chatbot.csproj \
+          --configuration Release \
+          --output ./publish/linux \
+          --runtime linux-x64 \
+          --self-contained false \
+          --no-restore
+      working-directory: .
+    
+    - name: Upload Linux build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: CyberPrime-Linux
+        path: ./publish/linux
+        retention-days: 30
+
+  build-macos:
+    name: Build on macOS (Compatibility)
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    
+    - name: Restore dependencies for macOS
+      run: dotnet restore Chatbot/Chatbot.csproj /p:RuntimeIdentifier=osx-x64
+      working-directory: .
+    
+    - name: Build project
+      run: dotnet build Chatbot/Chatbot.csproj --configuration Release --no-restore
+      working-directory: .
+    
+    - name: Publish macOS executable
+      run: |
+        dotnet publish Chatbot/Chatbot.csproj \
+          --configuration Release \
+          --output ./publish/macos \
+          --runtime osx-x64 \
+          --self-contained false \
+          --no-restore
+      working-directory: .
+    
+    - name: Upload macOS build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: CyberPrime-macOS
+        path: ./publish/macos
+        retention-days: 30
+
+  code-quality:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    
+    - name: Restore dependencies
+      run: dotnet restore Chatbot/Chatbot.csproj
+      working-directory: .
+    
+    - name: Run code style check
+      run: |
+        dotnet format Chatbot/Chatbot.csproj --verify-no-changes --severity info
+      working-directory: .
+      continue-on-error: true
+    
+    - name: Build with warnings as errors
+      run: dotnet build Chatbot/Chatbot.csproj --configuration Release --no-restore -warnaserror
+      working-directory: .
+      continue-on-error: true
+
+  create-release:
+    name: Create Release Package
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-linux, build-macos]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    
+    steps:
+    - name: Download Windows artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: CyberPrime-Windows
+        path: ./release/windows
+    
+    - name: Download Linux artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: CyberPrime-Linux
+        path: ./release/linux
+    
+    - name: Download macOS artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: CyberPrime-macOS
+        path: ./release/macos
+    
+    - name: Create Windows ZIP
+      run: |
+        cd ./release/windows
+        zip -r ../CyberPrime-Windows.zip .
+      shell: bash
+    
+    - name: Create Linux archive
+      run: |
+        cd ./release/linux
+        tar -czf ../CyberPrime-Linux.tar.gz .
+      shell: bash
+    
+    - name: Create macOS archive
+      run: |
+        cd ./release/macos
+        tar -czf ../CyberPrime-macOS.tar.gz .
+      shell: bash
+    
+    - name: Upload all release artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: CyberPrime-Releases
+        path: |
+          ./release/CyberPrime-Windows.zip
+          ./release/CyberPrime-Linux.tar.gz
+          ./release/CyberPrime-macOS.tar.gz
+        retention-days: 90
+
+  summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-linux, build-macos, code-quality]
+    if: always()
+    
+    steps:
+    - name: Create build summary
+      run: |
+        echo "## 🚀 CyberPrime Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Platform | Status | Artifact |" >> $GITHUB_STEP_SUMMARY
+        echo "|----------|--------|----------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Windows | ${{ needs.build-windows.result }} | CyberPrime-Windows |" >> $GITHUB_STEP_SUMMARY
+        echo "| Linux | ${{ needs.build-linux.result }} | CyberPrime-Linux |" >> $GITHUB_STEP_SUMMARY
+        echo "| macOS | ${{ needs.build-macos.result }} | CyberPrime-macOS |" >> $GITHUB_STEP_SUMMARY
+        echo "| Code Quality | ${{ needs.code-quality.result }} | - |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [[ "${{ needs.build-windows.result }}" == "success" ]] && \
+           [[ "${{ needs.build-linux.result }}" == "success" ]] && \
+           [[ "${{ needs.build-macos.result }}" == "success" ]]; then
+          echo "✅ **All builds completed successfully!**" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Some builds failed. Please check the logs.**" >> $GITHUB_STEP_SUMMARY
+        fi
